@@ -846,9 +846,12 @@ public class YoutubeStreamExtractor extends StreamExtractor {
         final PoTokenResult androidPoTokenResult = noPoTokenProviderSet ? null
                 : poTokenProviderInstance.getAndroidClientPoToken(videoId);
 
-        fetchAndroidClient(localization, contentCountry, videoId, androidPoTokenResult);
-
-        setStreamType();
+        Exception androidException = null;
+        try {
+            fetchAndroidClient(localization, contentCountry, videoId, androidPoTokenResult);
+        } catch (final Exception e) {
+            androidException = e;
+        }
 
         if (fetchIosClient) {
             final PoTokenResult iosPoTokenResult = noPoTokenProviderSet ? null
@@ -859,6 +862,20 @@ public class YoutubeStreamExtractor extends StreamExtractor {
         fetchVisionOsClient(localization, contentCountry, videoId);
 
         fetchWebClientMetadataAndSetThumbnails(localization, contentCountry, videoId);
+
+        if (playerResponse == null) {
+            if (androidException instanceof IOException) {
+                throw (IOException) androidException;
+            } else if (androidException instanceof ExtractionException) {
+                throw (ExtractionException) androidException;
+            } else if (androidException != null) {
+                throw new ExtractionException("Android client failed", androidException);
+            } else {
+                throw new ExtractionException("No player response available");
+            }
+        }
+
+        setStreamType();
 
         final byte[] nextBody = JsonWriter.string(
                 prepareDesktopJsonBuilder(localization, contentCountry)
@@ -969,6 +986,10 @@ public class YoutubeStreamExtractor extends StreamExtractor {
             if (!isPlayerResponseNotValid(iosPlayerResponse, videoId)) {
                 iosStreamingData = iosPlayerResponse.getObject(STREAMING_DATA);
 
+                if (playerResponse == null) {
+                    playerResponse = iosPlayerResponse;
+                }
+
                 if (isNullOrEmpty(playerCaptionsTracklistRenderer)) {
                     playerCaptionsTracklistRenderer = iosPlayerResponse.getObject(CAPTIONS)
                             .getObject(PLAYER_CAPTIONS_TRACKLIST_RENDERER);
@@ -995,6 +1016,10 @@ public class YoutubeStreamExtractor extends StreamExtractor {
 
             if (!isPlayerResponseNotValid(visionOsPlayerResponse, videoId)) {
                 visionOsStreamingData = visionOsPlayerResponse.getObject(STREAMING_DATA);
+
+                if (playerResponse == null) {
+                    playerResponse = visionOsPlayerResponse;
+                }
 
                 if (isNullOrEmpty(playerCaptionsTracklistRenderer)) {
                     playerCaptionsTracklistRenderer = visionOsPlayerResponse.getObject(CAPTIONS)
@@ -1031,10 +1056,12 @@ public class YoutubeStreamExtractor extends StreamExtractor {
                         .getObject(THUMBNAIL);
                 if (thumbnailWebJsonObj.containsKey(THUMBNAILS)) {
                     thumbnailsArray = thumbnailWebJsonObj.getArray(THUMBNAILS);
-                } else {
+                } else if (playerResponse != null) {
                     thumbnailsArray = playerResponse.getObject(VIDEO_DETAILS)
                             .getObject(THUMBNAIL)
                             .getArray(THUMBNAILS);
+                } else {
+                    thumbnailsArray = new JsonArray();
                 }
             }
         } catch (final Exception e) {
@@ -1042,9 +1069,13 @@ public class YoutubeStreamExtractor extends StreamExtractor {
             // compulsory to play contents
             // Set thumbnails from playerResponse
             playerMicroFormatRenderer = new JsonObject();
-            thumbnailsArray = playerResponse.getObject(VIDEO_DETAILS)
-                    .getObject(THUMBNAIL)
-                    .getArray(THUMBNAILS);
+            if (playerResponse != null) {
+                thumbnailsArray = playerResponse.getObject(VIDEO_DETAILS)
+                        .getObject(THUMBNAIL)
+                        .getArray(THUMBNAILS);
+            } else {
+                thumbnailsArray = new JsonArray();
+            }
         }
     }
 
